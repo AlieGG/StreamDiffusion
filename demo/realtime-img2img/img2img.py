@@ -323,6 +323,9 @@ class Pipeline:
                 self.is_ready = True
                 return None
 
+        if self.stream is None:
+            return None
+
         image_tensor = self.stream.preprocess_image(params.image)
         output_image = self.stream(image=image_tensor, prompt=params.prompt)
 
