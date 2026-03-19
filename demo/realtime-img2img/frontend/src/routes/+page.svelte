@@ -11,6 +11,9 @@
   import { lcmLiveStatus, lcmLiveActions, LCMLiveStatus } from '$lib/lcmLive';
   import { mediaStreamActions, onFrameChangeStore } from '$lib/mediaStream';
   import { getPipelineValues, deboucedPipelineValues } from '$lib/store';
+  import ModelManager from '$lib/components/ModelManager.svelte';
+
+  let activeTab: 'stream' | 'models' = 'stream';
 
   let pipelineParams: Fields;
   let pipelineInfo: PipelineInfo;
@@ -96,52 +99,80 @@
 
 <main class="container mx-auto flex max-w-5xl flex-col gap-3 px-4 py-4">
   <Warning bind:message={warningMessage}></Warning>
-  <article class="text-center">
-    {#if pageContent}
-      {@html pageContent}
-    {/if}
-    {#if maxQueueSize > 0}
-      <p class="text-sm">
-        There are <span id="queue_size" class="font-bold">{currentQueueSize}</span>
-        user(s) sharing the same GPU, affecting real-time performance. Maximum queue size is {maxQueueSize}.
-        <a
-          href="https://huggingface.co/spaces/radames/Real-Time-Latent-Consistency-Model?duplicate=true"
-          target="_blank"
-          class="text-blue-500 underline hover:no-underline">Duplicate</a
-        > and run it on your own GPU.
-      </p>
-    {/if}
-  </article>
-  {#if pipelineParams}
-    <article class="my-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {#if isImageMode}
-        <div class="sm:col-start-1">
-          <VideoInput
-            width={Number(pipelineParams.width.default)}
-            height={Number(pipelineParams.height.default)}
-          ></VideoInput>
-        </div>
+
+  <!-- Tab navigation -->
+  <div class="flex items-center gap-1 border-b border-slate-300 dark:border-slate-700">
+    <button
+      class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'stream'
+        ? 'border-b-2 border-blue-600 text-blue-600'
+        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}"
+      on:click={() => (activeTab = 'stream')}
+    >
+      Stream
+    </button>
+    <button
+      class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'models'
+        ? 'border-b-2 border-blue-600 text-blue-600'
+        : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}"
+      on:click={() => (activeTab = 'models')}
+    >
+      Models
+    </button>
+    <a
+      href="/viewer"
+      target="_blank"
+      class="ml-auto px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+      title="Open fullscreen viewer with black background"
+    >
+      ⛶ Viewer
+    </a>
+  </div>
+
+  {#if activeTab === 'stream'}
+    <article class="text-center">
+      {#if pageContent}
+        {@html pageContent}
       {/if}
-      <div class={isImageMode ? 'sm:col-start-2' : 'col-span-2'}>
-        <ImagePlayer />
-      </div>
-      <div class="sm:col-span-2">
-        <Button on:click={toggleLcmLive} {disabled} classList={'text-lg my-1 p-2'}>
-          {#if isLCMRunning}
-            Stop
-          {:else}
-            Start
-          {/if}
-        </Button>
-        <PipelineOptions {pipelineParams}></PipelineOptions>
-      </div>
+      {#if maxQueueSize > 0}
+        <p class="text-sm">
+          There are <span id="queue_size" class="font-bold">{currentQueueSize}</span>
+          user(s) sharing the same GPU, affecting real-time performance. Maximum queue size is {maxQueueSize}.
+        </p>
+      {/if}
     </article>
+    {#if pipelineParams}
+      <article class="my-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {#if isImageMode}
+          <div class="sm:col-start-1">
+            <VideoInput
+              width={Number(pipelineParams.width.default)}
+              height={Number(pipelineParams.height.default)}
+            ></VideoInput>
+          </div>
+        {/if}
+        <div class={isImageMode ? 'sm:col-start-2' : 'col-span-2'}>
+          <ImagePlayer />
+        </div>
+        <div class="sm:col-span-2">
+          <Button on:click={toggleLcmLive} {disabled} classList={'text-lg my-1 p-2'}>
+            {#if isLCMRunning}
+              Stop
+            {:else}
+              Start
+            {/if}
+          </Button>
+          <PipelineOptions {pipelineParams}></PipelineOptions>
+        </div>
+      </article>
+    {:else}
+      <!-- loading -->
+      <div class="flex items-center justify-center gap-3 py-48 text-2xl">
+        <Spinner classList={'animate-spin opacity-50'}></Spinner>
+        <p>Loading...</p>
+      </div>
+    {/if}
   {:else}
-    <!-- loading -->
-    <div class="flex items-center justify-center gap-3 py-48 text-2xl">
-      <Spinner classList={'animate-spin opacity-50'}></Spinner>
-      <p>Loading...</p>
-    </div>
+    <ModelManager />
   {/if}
 </main>
 

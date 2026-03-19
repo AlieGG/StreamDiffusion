@@ -27,6 +27,7 @@ export interface FieldProps {
     hide?: boolean;
     id: string;
     values?: string[];
+    description?: string;
 }
 export interface PipelineInfo {
     title: {

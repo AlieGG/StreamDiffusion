@@ -7,7 +7,7 @@ import os
 SAFETY_CHECKER = os.environ.get("SAFETY_CHECKER", "False") == "True"
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Config:
     """
     The configuration for the API.
@@ -34,11 +34,11 @@ class Config:
     # TinyVAE model
     vae_id: str = os.environ.get("VAE", "madebyollin/taesd")
     # Device to use
-    device: torch.device = torch.device("cuda")
+    device: torch.device("cuda" if torch.cuda.is_available() else "mps")
     # Data type
     dtype: torch.dtype = torch.float16
     # acceleration
-    acceleration: Literal["none", "xformers", "tensorrt"] = "xformers"
+    acceleration: Literal["none", "xformers", "tensorrt"] = "none"
 
     ####################################################################
     # Inference configuration

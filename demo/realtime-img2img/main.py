@@ -9,23 +9,52 @@ import markdown2
 import logging
 import uuid
 import time
+import threading
 from types import SimpleNamespace
 import asyncio
 import os
 import time
 import mimetypes
 import torch
+from huggingface_hub import snapshot_download
 
 from config import config, Args
 from util import pil_to_frame, bytes_to_pil
 from connection_manager import ConnectionManager, ServerFullException
-from img2img import Pipeline
+from img2img import Pipeline, AVAILABLE_MODELS
 
 # fix mime error on windows
 mimetypes.add_type("application/javascript", ".js")
 
 THROTTLE = 1.0 / 120
 # logging.basicConfig(level=logging.DEBUG)
+
+_download_state = {"downloading": None, "error": None, "completed": []}
+_download_lock = threading.Lock()
+
+
+def _check_model_cached(model_id: str) -> bool:
+    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+    model_dir = "models--" + model_id.replace("/", "--")
+    snapshots_dir = os.path.join(cache_dir, model_dir, "snapshots")
+    return os.path.exists(snapshots_dir) and bool(os.listdir(snapshots_dir))
+
+
+def _download_model_thread(model_id: str):
+    try:
+        snapshot_download(
+            repo_id=model_id,
+            ignore_patterns=["*.msgpack", "*.h5", "flax_model*", "tf_model*", "rust_model*"],
+        )
+        with _download_lock:
+            if model_id not in _download_state["completed"]:
+                _download_state["completed"].append(model_id)
+    except Exception as e:
+        with _download_lock:
+            _download_state["error"] = str(e)
+    finally:
+        with _download_lock:
+            _download_state["downloading"] = None
 
 
 class App:
@@ -102,11 +131,39 @@ class App:
             queue_size = self.conn_manager.get_user_count()
             return JSONResponse({"queue_size": queue_size})
 
+        @self.app.get("/api/ready")
+        async def ready():
+            return JSONResponse({"ready": pipeline.is_ready})
+
+        @self.app.get("/api/stream/output")
+        async def stream_output(request: Request):
+            async def generate():
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    frame = pipeline.last_frame
+                    if frame is not None:
+                        yield (
+                            b"--frame\r\n"
+                            b"Content-Type: image/jpeg\r\n"
+                            + f"Content-Length: {len(frame)}\r\n\r\n".encode()
+                            + frame
+                            + b"\r\n"
+                        )
+                    await asyncio.sleep(1 / 60)
+
+            return StreamingResponse(
+                generate(),
+                media_type="multipart/x-mixed-replace;boundary=frame",
+                headers={"Cache-Control": "no-cache"},
+            )
+
         @self.app.get("/api/stream/{user_id}")
         async def stream(user_id: uuid.UUID, request: Request):
             try:
 
                 async def generate():
+                    loop = asyncio.get_event_loop()
                     while True:
                         last_time = time.time()
                         await self.conn_manager.send_json(
@@ -115,7 +172,11 @@ class App:
                         params = await self.conn_manager.get_latest_data(user_id)
                         if params is None:
                             continue
-                        image = pipeline.predict(params)
+                        try:
+                            image = await loop.run_in_executor(None, pipeline.predict, params)
+                        except Exception as e:
+                            logging.error(f"predict executor error: {e}", exc_info=True)
+                            continue
                         if image is None:
                             continue
                         frame = pil_to_frame(image)
@@ -150,6 +211,46 @@ class App:
                 }
             )
 
+        @self.app.get("/api/models")
+        async def list_models():
+            models = []
+            with _download_lock:
+                currently_downloading = _download_state["downloading"]
+            for model_id in AVAILABLE_MODELS:
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": model_id.split("/")[-1],
+                        "downloaded": _check_model_cached(model_id),
+                        "downloading": currently_downloading == model_id,
+                    }
+                )
+            return JSONResponse({"models": models})
+
+        @self.app.post("/api/models/download")
+        async def download_model(request: Request):
+            data = await request.json()
+            model_id = data.get("model_id")
+            if not model_id or model_id not in AVAILABLE_MODELS:
+                raise HTTPException(status_code=400, detail="Invalid model ID")
+            with _download_lock:
+                if _download_state["downloading"]:
+                    raise HTTPException(
+                        status_code=409, detail="Another download is in progress"
+                    )
+                _download_state["downloading"] = model_id
+                _download_state["error"] = None
+            t = threading.Thread(
+                target=_download_model_thread, args=(model_id,), daemon=True
+            )
+            t.start()
+            return JSONResponse({"status": "started"})
+
+        @self.app.get("/api/models/download-status")
+        async def download_status():
+            with _download_lock:
+                return JSONResponse(dict(_download_state))
+
         if not os.path.exists("public"):
             os.makedirs("public")
 
@@ -158,7 +259,7 @@ class App:
         )
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 torch_dtype = torch.float16
 pipeline = Pipeline(config, device, torch_dtype)
 app = App(config, pipeline).app

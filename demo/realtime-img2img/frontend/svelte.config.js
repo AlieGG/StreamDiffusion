@@ -10,7 +10,13 @@ const config = {
       fallback: undefined,
       precompress: false,
       strict: true
-    })
+    }),
+    prerender: {
+      handleHttpError: ({ path, message }) => {
+        if (path.startsWith('/api/')) return;
+        throw new Error(message);
+      }
+    }
   }
 };
 
